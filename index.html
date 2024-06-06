@@ -1,0 +1,42 @@
+<html lang="en">
+<head>
+    <meta http-equiv="Content-Type" content="text/html;charset=UTF-8">
+    <title>isbaileybutlerintheoffice.today</title>
+    <style>
+        html { margin: 0; padding: 0; }
+        body {
+            align-items: center;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            justify-content: center;
+            margin: 0;
+            padding: 0;
+        }
+        h1 {
+            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+            font-size: 10em;
+            margin: 0 0 20px;
+        }
+        p {
+            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+            font-size: 1.5em;
+            margin: 0;
+        }
+        p img {
+            height: 30px;
+            margin: 0 10px -5px 0;
+        }
+    </style>
+</head>
+<body>
+<h1>
+    {{ .Presence }}
+</h1>
+{{ if eq .Presence "yes" }}
+<p>
+    <img src="/favicon.ico" />{{ .Transaction.Amount }} on {{ .Transaction.Description }}
+</p>
+{{ end }}
+</body>
+</html>
