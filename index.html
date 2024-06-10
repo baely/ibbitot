@@ -37,6 +37,10 @@
 <p>
     <img src="/favicon.ico" />{{ .Transaction.Amount }} on {{ .Transaction.Description }}
 </p>
+{{ else }}
+<p>
+    {{ .Reason }}
+</p>
 {{ end }}
 </body>
 </html>

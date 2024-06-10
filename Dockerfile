@@ -12,4 +12,6 @@ FROM alpine:latest
 
 COPY --from=builder /exec /exec
 
+RUN apk --no-cache add tzdata
+
 ENTRYPOINT ["/exec"]
