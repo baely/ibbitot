@@ -40,8 +40,8 @@ sequenceDiagram
     deactivate BalanceIn
     BalancePS ->> BalanceDo: Push event
     activate BalanceDo
-    BalancePS ->> Up: Retrieve Transaction & Account details
-    Up -->> BalancePS: Returns Transaction & Account details
+    BalanceDo ->> Up: Retrieve Transaction & Account details
+    Up -->> BalanceDo: Returns Transaction & Account details
     BalanceDo ->> BalanceDB: Store enriched details
     BalanceDo ->> OfficerIn: Post enriched details
     activate OfficerIn
