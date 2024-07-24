@@ -6,7 +6,7 @@ Service to consume banking transaction data from my [balance project](https://gi
 
 Transaction criteria for determining office presence:
  - Transaction amount is between $4.00 and $7.00
- - Transaction time is between 6:00am and 12:00pm
+ - ~~Transaction time is between 6:00am and 12:00pm~~
  - Transaction is on a weekday
  - Transaction is not a foreign transaction
  - Transaction is categorised as "Restaurants and Cafes"
