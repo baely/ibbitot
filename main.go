@@ -137,8 +137,8 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 
 func updatePresence(prevTransaction, transaction model.TransactionResource) error {
 	if !check(transaction,
-		amountBetween(-700, -400),         // between -$7 and -$4
-		timeBetween(6, 12),                // between 6am and 12pm
+		amountBetween(-700, -400), // between -$7 and -$4
+		//timeBetween(6, 12),                // between 6am and 12pm
 		weekday(),                         // on a weekday
 		notForeign(),                      // not a foreign transaction
 		category("restaurants-and-cafes"), // in the restaurants-and-cafes category
@@ -197,13 +197,7 @@ func weekday() decider {
 
 func fresh() decider {
 	return func(transaction model.TransactionResource) bool {
-		now := time.Now().In(loc)
-		if now.Year() == transaction.Attributes.CreatedAt.Year() &&
-			now.Month() == transaction.Attributes.CreatedAt.Month() &&
-			now.Day() == transaction.Attributes.CreatedAt.Day() {
-			return true
-		}
-		return false
+		return isToday(transaction)
 	}
 }
 
@@ -217,6 +211,12 @@ func category(categoryId string) decider {
 	return func(transaction model.TransactionResource) bool {
 		return transaction.Relationships.Category.Data.Id == categoryId
 	}
+}
+
+func isToday(transaction model.TransactionResource) bool {
+	now := time.Now().In(loc)
+	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	return transaction.Attributes.CreatedAt.After(midnight)
 }
 
 func getLatest() (model.TransactionResource, error) {
