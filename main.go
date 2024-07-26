@@ -124,7 +124,7 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 			Amount      string
 			Time        string
 		}{
-			Description: latestTransaction.Attributes.Description,
+			Description: fmt.Sprintf("%s at %s", latestTransaction.Attributes.Description, latestTransaction.Attributes.CreatedAt.Format("3:04pm")),
 			Amount:      fmt.Sprintf("$%.2f", -float64(latestTransaction.Attributes.Amount.ValueInBaseUnits)/100.0),
 			Time:        latestTransaction.Attributes.CreatedAt.Format(time.RFC1123),
 		},
@@ -254,7 +254,7 @@ func getReason(presence bool) string {
 }
 
 func getOfficeStatus() office.State {
-	uriPattern := "https://officetracker.baileys.page/api/v1/state/%d/%d/%d"
+	uriPattern := "https://iwasintheoffice.com/api/v1/state/%d/%d/%d"
 	now := time.Now().In(loc)
 	uriStr := fmt.Sprintf(uriPattern, now.Year(), now.Month(), now.Day())
 	uri := must(url.Parse(uriStr))
@@ -284,7 +284,7 @@ func updateOfficeStatus() error {
 	if existingStatus != office.StateUntracked {
 		return nil
 	}
-	uriPattern := "https://officetracker.baileys.page/api/v1/state/%d/%d/%d"
+	uriPattern := "https://iwasintheoffice.com/api/v1/state/%d/%d/%d"
 	now := time.Now().In(loc)
 	uriStr := fmt.Sprintf(uriPattern, now.Year(), now.Month(), now.Day())
 	uri := must(url.Parse(uriStr))
