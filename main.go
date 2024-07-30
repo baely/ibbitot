@@ -124,7 +124,7 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 			Amount      string
 			Time        string
 		}{
-			Description: fmt.Sprintf("%s at %s", latestTransaction.Attributes.Description, latestTransaction.Attributes.CreatedAt.Format("3:04pm")),
+			Description: fmt.Sprintf("%s at %s", latestTransaction.Attributes.Description, latestTransaction.Attributes.CreatedAt.In(loc).Format("3:04pm")),
 			Amount:      fmt.Sprintf("$%.2f", -float64(latestTransaction.Attributes.Amount.ValueInBaseUnits)/100.0),
 			Time:        latestTransaction.Attributes.CreatedAt.Format(time.RFC1123),
 		},
