@@ -30,17 +30,7 @@
     </style>
 </head>
 <body>
-<h1>
-    {{ .Presence }}
-</h1>
-{{ if eq .Presence "yes" }}
-<p>
-    <img src="/favicon.ico" />{{ .Transaction.Amount }} on {{ .Transaction.Description }}
-</p>
-{{ else }}
-<p>
-    {{ .Reason }}
-</p>
-{{ end }}
+<h1>%s</h1>
+<p>%s</p>
 </body>
 </html>

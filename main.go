@@ -1,28 +1,19 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"html/template"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
 	"time"
 
-	"cloud.google.com/go/firestore"
 	"github.com/baely/balance/pkg/model"
 	office "github.com/baely/officetracker/pkg/model"
-)
-
-const (
-	projectID  = "inoffice-23952"
-	collection = "baileypresent"
-	document   = "transaction"
+	"github.com/twmb/franz-go/pkg/kgo"
 )
 
 var (
@@ -35,7 +26,12 @@ var (
 
 var (
 	officeTrackerAPIKey = os.Getenv("OFFICETRACKER_API_KEY")
+	kafkaBrokers        = os.Getenv("KAFKA_BROKERS")
 	loc, _              = time.LoadLocation("Australia/Melbourne")
+)
+
+var (
+	cachedTransaction model.TransactionResource
 )
 
 func main() {
@@ -44,7 +40,8 @@ func main() {
 		port = "8080"
 	}
 	m := http.NewServeMux()
-	m.HandleFunc("/webhook", webhookHandler)
+	go transactionListener()
+	go updateStatus()
 	m.HandleFunc("/raw", rawHandler)
 	m.HandleFunc("/", indexHandler)
 	m.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
@@ -62,27 +59,34 @@ func main() {
 	}
 }
 
-func webhookHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	latestTransaction, err := getLatest()
+func transactionListener() {
+	client, err := kgo.NewClient(
+		kgo.SeedBrokers(kafkaBrokers),
+		kgo.ConsumeTopics("transactions"),
+	)
 	if err != nil {
-		slog.Error("Error getting latest transaction: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
+		panic(err)
 	}
-	m := model.RawWebhookEvent{}
-	if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
-		slog.Error("Error decoding webhook event: %v", err)
-		http.Error(w, "Bad request", http.StatusBadRequest)
-		return
-	}
-	if err := updatePresence(latestTransaction, m.Transaction); err != nil {
-		slog.Error("Error updating presence: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
+	defer client.Close()
+
+	ctx := context.Background()
+
+	for {
+		fetches := client.PollFetches(ctx)
+		if errs := fetches.Errors(); len(errs) > 0 {
+			panic(fmt.Sprintln(errs))
+		}
+
+		iter := fetches.RecordIter()
+		for !iter.Done() {
+			message := iter.Next()
+			var transactionEvent struct {
+				Account     model.AccountResource
+				Transaction model.TransactionResource
+			}
+			_ = json.Unmarshal(message.Value, &transactionEvent)
+			updatePresence(transactionEvent.Transaction)
+		}
 	}
 }
 
@@ -91,51 +95,21 @@ func rawHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	latestTransaction, err := getLatest()
-	if err != nil {
-		slog.Error("Error getting latest transaction: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
+	latestTransaction := getLatest()
 	w.Header().Add("Content-Type", "text/plain")
 	w.Write([]byte(presentString(latestTransaction)))
 }
 
 func indexHandler(w http.ResponseWriter, r *http.Request) {
-	latestTransaction, err := getLatest()
-	if err != nil {
-		slog.Error("Error getting latest transaction: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-	tmpl := template.Must(template.New("index").Parse(indexHTML))
-	err = tmpl.Execute(w, struct {
-		Presence    string
-		Transaction struct {
-			Description string
-			Amount      string
-			Time        string
-		}
-		Reason string
-	}{
-		Presence: presentString(latestTransaction),
-		Transaction: struct {
-			Description string
-			Amount      string
-			Time        string
-		}{
-			Description: fmt.Sprintf("%s at %s", latestTransaction.Attributes.Description, latestTransaction.Attributes.CreatedAt.In(loc).Format("3:04pm")),
-			Amount:      fmt.Sprintf("$%.2f", -float64(latestTransaction.Attributes.Amount.ValueInBaseUnits)/100.0),
-			Time:        latestTransaction.Attributes.CreatedAt.Format(time.RFC1123),
-		},
-		Reason: getReason(present(latestTransaction)),
-	})
-	if err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-	}
+	slog.Info("Request received")
+	latestTransaction := getLatest()
+	title := presentString(latestTransaction)
+	desc := getReason(present(latestTransaction), latestTransaction)
+	s := fmt.Sprintf(indexHTML, title, desc)
+	w.Write([]byte(s))
 }
 
-func updatePresence(prevTransaction, transaction model.TransactionResource) error {
+func updatePresence(transaction model.TransactionResource) {
 	if !check(transaction,
 		amountBetween(-700, -400), // between -$7 and -$4
 		//timeBetween(6, 12),                // between 6am and 12pm
@@ -144,10 +118,10 @@ func updatePresence(prevTransaction, transaction model.TransactionResource) erro
 		category("restaurants-and-cafes"), // in the restaurants-and-cafes category
 	) {
 		slog.Warn("Transaction does not meet criteria")
-		return nil
+		return
 	}
 
-	return store(prevTransaction, transaction)
+	store(transaction)
 }
 
 func present(latestTransaction model.TransactionResource) bool {
@@ -219,23 +193,8 @@ func isToday(transaction model.TransactionResource) bool {
 	return transaction.Attributes.CreatedAt.After(midnight)
 }
 
-func getLatest() (model.TransactionResource, error) {
-	ctx := context.Background()
-	client, err := firestore.NewClient(ctx, projectID)
-	if err != nil {
-		return model.TransactionResource{}, err
-	}
-	doc := client.Collection(collection).Doc(document)
-	ref, err := doc.Get(ctx)
-	if err != nil {
-		return model.TransactionResource{}, err
-	}
-	var transaction model.TransactionResource
-	err = ref.DataTo(&transaction)
-	if err != nil {
-		return model.TransactionResource{}, err
-	}
-	return transaction, nil
+func getLatest() model.TransactionResource {
+	return cachedTransaction
 }
 
 func must[T any](t T, err error) T {
@@ -245,12 +204,31 @@ func must[T any](t T, err error) T {
 	return t
 }
 
-func getReason(presence bool) string {
-	state := getOfficeStatus()
+func getReason(presence bool, t model.TransactionResource) string {
+	state := latestStatus
 	if !presence && state == office.StateWorkFromOffice {
 		return "(but he said he would be)"
 	}
+
+	if presence {
+		amt := fmt.Sprintf("$%.2f", -float64(t.Attributes.Amount.ValueInBaseUnits)/100.0)
+		p1 := fmt.Sprintf("%s at %s", t.Attributes.Description, t.Attributes.CreatedAt.In(loc).Format(time.Kitchen))
+		return fmt.Sprintf("<img src=\"/favicon.ico\" />%s on %s", amt, p1)
+	}
+
 	return ""
+}
+
+var (
+	latestStatus = office.State(-1)
+)
+
+func updateStatus() {
+	ticker := time.Tick(5 * time.Minute)
+	for {
+		<-ticker
+		latestStatus = getOfficeStatus()
+	}
 }
 
 func getOfficeStatus() office.State {
@@ -276,59 +254,14 @@ func getOfficeStatus() office.State {
 		slog.Error("Error decoding office status: %v", err)
 		return office.StateUntracked
 	}
+	latestStatus = stateResp.Data.State
 	return stateResp.Data.State
 }
 
-func updateOfficeStatus() error {
-	existingStatus := getOfficeStatus()
-	if existingStatus != office.StateUntracked {
-		return nil
+func store(transaction model.TransactionResource) {
+	if cachedTransaction.Attributes.CreatedAt.After(transaction.Attributes.CreatedAt) {
+		return
 	}
-	uriPattern := "https://iwasintheoffice.com/api/v1/state/%d/%d/%d"
-	now := time.Now().In(loc)
-	uriStr := fmt.Sprintf(uriPattern, now.Year(), now.Month(), now.Day())
-	uri := must(url.Parse(uriStr))
-	stateReq := office.PutDayRequest{
-		Data: office.DayState{
-			State: office.StateWorkFromOffice,
-		},
-	}
-	b, err := json.Marshal(stateReq)
-	if err != nil {
-		return err
-	}
-	req := &http.Request{
-		Method: http.MethodPut,
-		URL:    uri,
-		Header: map[string][]string{
-			"Authorization": {"Bearer " + officeTrackerAPIKey},
-		},
-		Body: io.NopCloser(bytes.NewReader(b)),
-	}
-	_, err = http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func store(prevTransaction, transaction model.TransactionResource) error {
-	ctx := context.Background()
-	client, err := firestore.NewClient(ctx, projectID)
-	if err != nil {
-		return err
-	}
-	doc := client.Collection(collection).Doc(document)
-	if prevTransaction.Attributes.CreatedAt.After(transaction.Attributes.CreatedAt) {
-		return nil
-	}
-	_, err = doc.Set(ctx, transaction)
-	if err != nil {
-		return err
-	}
-	err = updateOfficeStatus()
-	if err != nil {
-		return err
-	}
-	return nil
+	fmt.Printf("Cached transaction updated, %s on %s\n", transaction.Attributes.Description, transaction.Attributes.CreatedAt.Format(time.RFC1123))
+	cachedTransaction = transaction
 }
