@@ -226,6 +226,7 @@ func updateStatus() {
 	for {
 		<-ticker
 		latestStatus = getOfficeStatus()
+		refreshPage()
 	}
 }
 
