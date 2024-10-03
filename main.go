@@ -44,6 +44,7 @@ func main() {
 	refreshPage()
 	go transactionListener()
 	go updateStatus()
+	go dailyPageRefresher()
 	m.HandleFunc("/raw", rawHandler)
 	m.HandleFunc("/", indexHandler)
 	m.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
@@ -226,7 +227,6 @@ func updateStatus() {
 	for {
 		<-ticker
 		latestStatus = getOfficeStatus()
-		refreshPage()
 	}
 }
 
@@ -271,4 +271,27 @@ func refreshPage() {
 	title := presentString(latestTransaction)
 	desc := getReason(present(latestTransaction), latestTransaction)
 	indexPage = []byte(fmt.Sprintf(indexHTML, title, desc))
+}
+
+func dailyPageRefresher() {
+	ticker := make(chan time.Time)
+	go runDailyTicker(ticker)
+	for {
+		<-ticker
+		refreshPage()
+	}
+}
+
+func runDailyTicker(ticker chan<- time.Time) {
+	for {
+		now := time.Now()
+		nextMidnight := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
+		duration := nextMidnight.Sub(now)
+
+		// Sleep until the next midnight
+		time.Sleep(duration)
+
+		// Send the tick
+		ticker <- time.Now()
+	}
 }
