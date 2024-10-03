@@ -32,6 +32,7 @@ var (
 
 var (
 	cachedTransaction model.TransactionResource
+	indexPage         []byte
 )
 
 func main() {
@@ -40,6 +41,7 @@ func main() {
 		port = "8080"
 	}
 	m := http.NewServeMux()
+	refreshPage()
 	go transactionListener()
 	go updateStatus()
 	m.HandleFunc("/raw", rawHandler)
@@ -102,11 +104,7 @@ func rawHandler(w http.ResponseWriter, r *http.Request) {
 
 func indexHandler(w http.ResponseWriter, r *http.Request) {
 	slog.Info("Request received")
-	latestTransaction := getLatest()
-	title := presentString(latestTransaction)
-	desc := getReason(present(latestTransaction), latestTransaction)
-	s := fmt.Sprintf(indexHTML, title, desc)
-	w.Write([]byte(s))
+	w.Write(indexPage)
 }
 
 func updatePresence(transaction model.TransactionResource) {
@@ -264,4 +262,12 @@ func store(transaction model.TransactionResource) {
 	}
 	fmt.Printf("Cached transaction updated, %s on %s\n", transaction.Attributes.Description, transaction.Attributes.CreatedAt.Format(time.RFC1123))
 	cachedTransaction = transaction
+	refreshPage()
+}
+
+func refreshPage() {
+	latestTransaction := getLatest()
+	title := presentString(latestTransaction)
+	desc := getReason(present(latestTransaction), latestTransaction)
+	indexPage = []byte(fmt.Sprintf(indexHTML, title, desc))
 }
