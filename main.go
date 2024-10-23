@@ -62,6 +62,11 @@ func main() {
 	}
 }
 
+// getNow returns the current time with timezone. helper function because i kept having skill issues with tz
+func getNow() time.Time {
+	return time.Now().In(loc)
+}
+
 func transactionListener() {
 	client, err := kgo.NewClient(
 		kgo.SeedBrokers(kafkaBrokers),
@@ -187,8 +192,8 @@ func category(categoryId string) decider {
 }
 
 func isToday(transaction model.TransactionResource) bool {
-	now := time.Now().In(loc)
-	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	now := getNow()
+	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	return transaction.Attributes.CreatedAt.After(midnight)
 }
 
@@ -232,7 +237,7 @@ func updateStatus() {
 
 func getOfficeStatus() office.State {
 	uriPattern := "https://iwasintheoffice.com/api/v1/state/%d/%d/%d"
-	now := time.Now().In(loc)
+	now := getNow()
 	uriStr := fmt.Sprintf(uriPattern, now.Year(), now.Month(), now.Day())
 	uri := must(url.Parse(uriStr))
 	req := &http.Request{
@@ -284,14 +289,13 @@ func dailyPageRefresher() {
 
 func runDailyTicker(ticker chan<- time.Time) {
 	for {
-		now := time.Now()
+		now := getNow()
 		nextMidnight := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
 		duration := nextMidnight.Sub(now)
-
-		// Sleep until the next midnight
+		slog.Warn(fmt.Sprintf("Current time: %s. Sleeping for: %s.", now, duration))
 		time.Sleep(duration)
-
-		// Send the tick
-		ticker <- time.Now()
+		// Sleep for a little longer
+		time.Sleep(500 * time.Millisecond)
+		ticker <- getNow()
 	}
 }
