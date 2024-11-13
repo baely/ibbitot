@@ -88,6 +88,7 @@ func transactionListener() {
 		iter := fetches.RecordIter()
 		for !iter.Done() {
 			message := iter.Next()
+			slog.Info("Received message")
 			var transactionEvent struct {
 				Account     model.AccountResource
 				Transaction model.TransactionResource
@@ -110,6 +111,9 @@ func rawHandler(w http.ResponseWriter, r *http.Request) {
 
 func indexHandler(w http.ResponseWriter, r *http.Request) {
 	slog.Info("Request received")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
 	w.Write(indexPage)
 }
 
@@ -187,6 +191,10 @@ func notForeign() decider {
 
 func category(categoryId string) decider {
 	return func(transaction model.TransactionResource) bool {
+		if transaction.Relationships.Category.Data == nil {
+			return false
+		}
+
 		return transaction.Relationships.Category.Data.Id == categoryId
 	}
 }
