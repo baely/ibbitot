@@ -277,7 +277,7 @@ func refreshPage() {
 	title := presentString(latestTransaction)
 	desc := getReason(present(latestTransaction), latestTransaction)
 	replaced := replacePage([]byte(fmt.Sprintf(indexHTML, title, desc)))
-	if !replaced {
+	if replaced {
 		fireSlack(title, desc)
 	}
 }
