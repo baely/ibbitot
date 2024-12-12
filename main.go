@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -275,7 +276,35 @@ func refreshPage() {
 	latestTransaction := getLatest()
 	title := presentString(latestTransaction)
 	desc := getReason(present(latestTransaction), latestTransaction)
-	indexPage = []byte(fmt.Sprintf(indexHTML, title, desc))
+	replaced := replacePage([]byte(fmt.Sprintf(indexHTML, title, desc)))
+	if !replaced {
+		fireSlack(title, desc)
+	}
+}
+
+func replacePage(b []byte) bool {
+	old := indexPage
+	indexPage = b
+	return !bytes.Equal(old, b) // return true if the page was updated
+}
+
+func fireSlack(title, desc string) {
+	u := os.Getenv("SLACK_WEBHOOK")
+	type req struct {
+		Status      string `json:"status"`
+		Description string `json:"description"`
+	}
+	b, _ := json.Marshal(req{Status: title, Description: desc})
+	resp, err := http.DefaultClient.Post(u, "application/json", bytes.NewReader(b))
+	if err != nil {
+		slog.Error("Error sending slack message", "error", err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		slog.Error("Error sending slack message", "status", resp.Status)
+		return
+	}
 }
 
 func dailyPageRefresher() {
