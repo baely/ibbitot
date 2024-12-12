@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -88,6 +89,7 @@ func transactionListener() {
 		iter := fetches.RecordIter()
 		for !iter.Done() {
 			message := iter.Next()
+			slog.Info("Received message")
 			var transactionEvent struct {
 				Account     model.AccountResource
 				Transaction model.TransactionResource
@@ -110,6 +112,9 @@ func rawHandler(w http.ResponseWriter, r *http.Request) {
 
 func indexHandler(w http.ResponseWriter, r *http.Request) {
 	slog.Info("Request received")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
 	w.Write(indexPage)
 }
 
@@ -187,6 +192,10 @@ func notForeign() decider {
 
 func category(categoryId string) decider {
 	return func(transaction model.TransactionResource) bool {
+		if transaction.Relationships.Category.Data == nil {
+			return false
+		}
+
 		return transaction.Relationships.Category.Data.Id == categoryId
 	}
 }
@@ -275,7 +284,35 @@ func refreshPage() {
 	latestTransaction := getLatest()
 	title := presentString(latestTransaction)
 	desc := getReason(present(latestTransaction), latestTransaction)
-	indexPage = []byte(fmt.Sprintf(indexHTML, title, desc))
+	replaced := replacePage([]byte(fmt.Sprintf(indexHTML, title, desc)))
+	if replaced {
+		fireSlack(title, desc)
+	}
+}
+
+func replacePage(b []byte) bool {
+	old := indexPage
+	indexPage = b
+	return !bytes.Equal(old, b) // return true if the page was updated
+}
+
+func fireSlack(title, desc string) {
+	u := os.Getenv("SLACK_WEBHOOK")
+	type req struct {
+		Status      string `json:"status"`
+		Description string `json:"description"`
+	}
+	b, _ := json.Marshal(req{Status: title, Description: desc})
+	resp, err := http.DefaultClient.Post(u, "application/json", bytes.NewReader(b))
+	if err != nil {
+		slog.Error("Error sending slack message", "error", err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		slog.Error("Error sending slack message", "status", resp.Status)
+		return
+	}
 }
 
 func dailyPageRefresher() {
